@@ -15,7 +15,8 @@ install_requires = [
     'scikit-learn>=0.23.2',
     'seaborn>=0.11.1',
     f'hessian_eigenthings @ file://localhost/{Path(__file__).parent}/pytorch-hessian-eigenthings/',
-    f'curvature @ file://localhost/{Path(__file__).parent}/curvature/'
+    f'curvature @ file://localhost/{Path(__file__).parent}/curvature/',
+    f'autograd_hacks @ file://localhost/{Path(__file__).parent}/third_party/autograd-hacks/'
 ]
 
 setup(name="nn_ood",

@@ -4,3 +4,6 @@
 [submodule "curvature"]
 	path = curvature
 	url = https://github.com/DLR-RM/curvature.git
+[submodule "third_party/autograd-hacks"]
+	path = third_party/autograd-hacks
+	url = git@github.com:agiachris/autograd-hacks.git
