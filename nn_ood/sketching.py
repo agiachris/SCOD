@@ -1,3 +1,4 @@
+from argparse import ArgumentError
 import numpy as np
 import torch
 import torch.nn as nn
@@ -35,6 +36,42 @@ def idct(X, norm=None):
     x[:, ::2] += v[:, :N - (N // 2)]
     x[:, 1::2] += v.flip([1])[:, :N // 2]
 
+    return x.view(*x_shape) 
+
+def batch_idct(X, norm=None):
+    """
+    based on https://github.com/zh217/torch-dct/blob/master/torch_dct/_dct.py
+    updated to work with more recent versions of pytorch which moved fft functionality to 
+    the torch.fft module
+    """
+    x_shape = X.shape
+    B = x_shape[0]
+    N = x_shape[-1]
+
+    X_v = X.contiguous().view(x_shape) / 2
+
+    if norm == 'ortho':
+        X_v[:, :, 0] *= np.sqrt(N) * 2
+        X_v[:, :, 1:] *= np.sqrt(N / 2) * 2
+
+    k = torch.arange(N, dtype=X.dtype, device=X.device)[None, :] * np.pi / (2 * N)
+    W_r = torch.cos(k)
+    W_i = torch.sin(k)
+
+    V_t_r = X_v
+    V_t_i = torch.cat([X_v[:, :, :1] * 0, -X_v.flip([2])[:, :, :-1]], dim=2)
+
+    V_r = V_t_r * W_r - V_t_i * W_i
+    V_i = V_t_r * W_i + V_t_i * W_r
+
+    V = torch.cat([V_r.unsqueeze(3), V_i.unsqueeze(3)], dim=3)
+
+    v = torch.fft.irfft(torch.view_as_complex(V), n=N, dim=2)
+
+    x = v.new_zeros(v.shape)
+    x[:, :, ::2] += v[:, :, :N - (N // 2)]
+    x[:, :, 1::2] += v.flip([2])[:, :, :N // 2]
+    
     return x.view(*x_shape) 
 
 class SketchOperator(nn.Module):
@@ -75,17 +112,22 @@ class SRFTSketchOp(SketchOperator):
     @torch.no_grad()
     def forward(self,M, transpose=False):
         if transpose:
-            M = M.t()
+            try: M = M.t()
+            except: M = M.transpose(2, 1)
             
-        if M.dim() == 2:
+        if M.dim() == 3:
+            result = batch_idct((self.D[:, None]*M).transpose(2, 1))
+            result = result.transpose(2, 1)[:, self.P, :]
+        elif M.dim() == 2:
             result = idct((self.D[:,None]*M).t()).t()[self.P,:]
         elif M.dim() == 1:
             result = idct(self.D*M)[self.P]
         else:
-            raise InvalidArgumentError
+            raise ArgumentError
         
         if transpose:
-            result = result.t()
+            try: result = result.t()
+            except: result = result.transpose(2, 1)
             
         return result
     
@@ -268,7 +310,29 @@ class RandomSymSketch(LinearSketch):
         self.Psi.cpu()
         U,D = self.fixed_rank_eig_approx(2*self.k)#self.r)
         return D,U
+
+class BatchRandomSymSketch(RandomSymSketch):
+    """
+    computes a sketch of AA^T when presented columns of A in sequential batch
+    fashion, then uses eigenvalue decomp of sketch to compute 
+    rank r range basis
+    """
+    def __init__(self, N, M, r, T=None, gpu=False, sketch_op_class=GaussianSketchOp):
+        super.__init__(N, M, r, T=T, gpu=gpu, sketch_op_class=sketch_op_class)
     
+    @torch.no_grad()
+    def low_rank_update(self, i, v, weight):
+        """
+        processes v (batch x nparam x d) the a batch of columns of matrix A
+        """
+        v = v.to(self.device)
+        assert v.dim() == 3
+        batch_size = v.size(0)
+        dY = torch.sum((weight * v) @ self.Om_fn(v.transpose(2, 1)), dim=0)        
+        self.Y += (batch_size/self.M) * dY
+        dW = torch.sum((weight * self.Psi_fn(v)) @ v.transpose(2, 1), dim=0)
+        self.W += (batch_size/self.M) * dW
+
 class RandomOneSidedSymSketch(LinearSketch):
     """
     computes a sketch of AA^T when presented columns of A sequentially
@@ -384,7 +448,17 @@ class SRFTSymSketch(RandomSymSketch):
     """
     def __init__(self, N, M, r, T=None, gpu=True):
         super().__init__(N, M, r, T, gpu, sketch_op_class=SRFTSketchOp)
-        
+
+class BatchSRFTSymSketch(BatchRandomSymSketch):
+    """
+    computes a subsampled randomized fourier transform sketch 
+    of AA^T when presented columns of A sequentially.
+    
+    then, uses eigen decomp of sketch to compute 
+    rank r range basis
+    """
+    def __init__(self, N, M, r, T=None, gpu=True):
+        super().__init__(N, M, r, T, gpu, sketch_op_class=SRFTSketchOp)
     
 class SRFTOneSidedSymSketch(RandomOneSidedSymSketch):
     """
@@ -401,9 +475,11 @@ class SRFTOneSidedSymSketch(RandomOneSidedSymSketch):
 sketch_args = {
     'minibatch': MiniBatchSketch,
     'random': RandomSymSketch,
+    'batch_random': BatchRandomSymSketch,
     'random_onesided': RandomOneSidedSymSketch,
     'random_svd': RandomSVDSketch,
     'srft': SRFTSymSketch,
+    'batch_srft': BatchSRFTSymSketch,
     'srft_onesided': SRFTOneSidedSymSketch,
 }
 
@@ -453,11 +529,40 @@ class Projector(nn.Module):
         """
         basis = self.basis[:,-n_eigs:]
         eigs = torch.clamp( self.eigs[-n_eigs:], min=0.)
+        scaling = torch.sqrt( eigs / ( eigs + 1./(Meps) ) )[:, None]
+        proj_L = scaling * (basis.t() @ L)
+        unc = torch.sqrt( torch.sum(L**2) - torch.sum(proj_L**2) )
+        return unc
 
-        scaling = torch.sqrt( eigs / ( eigs + 1./(2*Meps) ) )
-        proj_L = scaling[:,None] * (basis.t() @ L)
+    def batch_posterior_pred(self, L, n_eigs, Meps):
+        """
+        we have U = basis,
+        computes ||(I-UU^T)L||^2_F
+        """
+        assert L.dim() == 3, "Factorized test Fisher's (L) must be batched"
+        basis = self.basis[:,-n_eigs:]
+        eigs = torch.clamp( self.eigs[-n_eigs:], min=0.)
+        scaling = torch.sqrt( eigs / ( eigs + 1./(Meps) ) )[:, None]
+        proj_L = scaling * (basis.t() @ L)
+        unc = torch.sqrt( torch.sum(L**2, dim=(1, 2)) - torch.sum(proj_L**2, dim=(1, 2)) )
+        return unc
 
-        return torch.sqrt( torch.sum(L**2) - torch.sum(proj_L**2) )
+    def batch_posterior_pred_var(self, J, n_eigs, Meps):
+        """
+        we have U = basis,
+        computes JJ^T - JU diag(eigs / (1/Meps + eigs)) U^T J^T
+        Note: J and L are different; do not pre-multiply J with apply_sqrt_F prior
+              to calling this function.
+        """
+        assert J.dim() == 3, "Weight Jacobian of NN must be batched"
+        basis = self.basis[:,-n_eigs:]
+        eigs = torch.clamp( self.eigs[-n_eigs:], min=0.)
+        scaling = eigs / (eigs + 1./(Meps))[:, None]
+        # Compute variance      
+        JT = J.transpose(2, 1)
+        JT_UT = JT @ basis
+        var = JT @ J - JT_UT @ (scaling * JT_UT.transpose(2, 1))
+        return var
     
     def ortho_2norm(self, L, n_eigs):
         """
@@ -519,6 +624,10 @@ class Projector(nn.Module):
             return self.sampled_ortho_proj(L, n_eigs)
         elif proj_type == 'posterior_pred':
             return self.posterior_pred(L, n_eigs, Meps)
+        elif proj_type == 'batch_posterior_pred':
+            return self.batch_posterior_pred(L, n_eigs, Meps)
+        elif proj_type == 'batch_posterior_pred_var':
+            return self.batch_posterior_pred_var(L, n_eigs, Meps)
         elif proj_type == 'ortho_2norm':
             return self.ortho_2norm(L, n_eigs)
         elif proj_type == "scaled_ortho":

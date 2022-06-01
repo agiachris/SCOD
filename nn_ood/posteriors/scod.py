@@ -61,7 +61,7 @@ class SCOD(nn.Module):
             gpu=self.gpu
         )
         
-    def process_dataset(self, dataset, input_keys=None):
+    def process_dataset(self, dataset):
         """
         summarizes information about training data by logging gradient directions
         seen during training, and then using gram schmidt of these to form
@@ -69,7 +69,6 @@ class SCOD(nn.Module):
         taken to be irrelevant to data, and used for detecting generalization
         
         dataset - torch dataset of (input, target) pairs
-        input_keys - list(str) of input keys if the dataset returns batched dictionaries
         """
         # TODO: use .to(self.device) instead
         def prep_vec(vec):
@@ -92,24 +91,16 @@ class SCOD(nn.Module):
                                    gpu=self.gpu)
         
         n_data = len(dataloader)
-        for i, sample in tqdm(enumerate(dataloader), total=n_data):
+        for i, (inputs,labels) in tqdm(enumerate(dataloader), total=n_data):
+            inputs = prep_vec(inputs)
+            labels = prep_vec(labels)
 
-            if isinstance(sample, dict):
-                assert input_keys is not None, "Require keys to extract inputs"
-                assert not self.weighted, "Dataset does not provide labels"
-                inputs = [sample[k] for k in input_keys]
-                labels = None
-            elif isinstance(sample, tuple):
-                assert input_keys is None, "Keys cannot be used to extract inputs from a tuple"
-                inputs = prep_vec(sample[0])
-                labels = prep_vec(sample[1])
-
-            thetas = self.model(*inputs) if isinstance(inputs, list) \
-                else self.model(inputs) # get params of output dist
+            thetas = self.model(inputs) # get params of output dist
             weight = 1.
             if self.weighted:
                 nll = self.dist_fam.loss(thetas, labels) # get nll of sample
                 weight = torch.exp(-nll) # p(y|x)
+            
             
             thetas = self.dist_fam.apply_sqrt_F(thetas) # pre-multipy by sqrt fisher
             thetas = thetas.mean(dim=0) # mean over batch dim
@@ -148,8 +139,9 @@ class SCOD(nn.Module):
         return torch.cat([p.grad.contiguous().view(-1) 
                              for p in self.trainable_params]
                         )
+            
     
-    def forward(self, inputs, input_keys=None, n_eigs=None, Meps=5000):
+    def forward(self, inputs, n_eigs=None, Meps=5000):
         """
         assumes inputs are of shape (N, input_dims...)
         where N is the batch dimension,
@@ -165,16 +157,10 @@ class SCOD(nn.Module):
             
         if n_eigs is None:
             n_eigs = self.num_eigs
+            
+        N = inputs.shape[0]
         
-        if isinstance(inputs, dict):
-            assert input_keys is not None, "Require keys to extract inputs"
-            inputs = [inputs[k] for k in input_keys]
-            N = inputs[0].shape[0]
-            mu = self.model(*inputs).transpose(0, 1)
-        else:
-            N = inputs.shape[0]
-            mu = self.model(inputs)
-
+        mu = self.model(inputs)
         unc = torch.zeros(N)
         
         # batch apply sqrt(I_th) to output
