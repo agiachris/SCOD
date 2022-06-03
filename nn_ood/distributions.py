@@ -60,7 +60,7 @@ class GaussianFixedDiagVar(DistFam):
     """
     def __init__(self, sigma_diag=np.array([1.]), min_val=-5, max_val=5):
         super().__init__()
-        self.sigma_diag = nn.Parameter(torch.from_numpy(sigma_diag).float(), requires_grad=False)
+        self.sigma_diag = nn.Parameter(torch.from_numpy(sigma_diag).float(), requires_grad=True)
     
     def dist(self, thetas):
         C = torch.diag_embed(torch.ones_like(thetas)*self.sigma_diag)

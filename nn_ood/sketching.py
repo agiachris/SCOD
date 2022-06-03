@@ -318,7 +318,7 @@ class BatchRandomSymSketch(RandomSymSketch):
     rank r range basis
     """
     def __init__(self, N, M, r, T=None, gpu=False, sketch_op_class=GaussianSketchOp):
-        super.__init__(N, M, r, T=T, gpu=gpu, sketch_op_class=sketch_op_class)
+        super().__init__(N, M, r, T=T, gpu=gpu, sketch_op_class=sketch_op_class)
     
     @torch.no_grad()
     def low_rank_update(self, i, v, weight):
@@ -499,8 +499,8 @@ class Projector(nn.Module):
         
     @torch.no_grad()
     def process_basis(self, eigs, basis):
-        self.eigs.data = eigs.to(self.device)
-        self.basis.data = basis.to(self.device)
+        self.eigs.data.copy_(eigs.to(self.device))
+        self.basis.data.copy_(basis.to(self.device))
 
     def ortho_proj(self, L, n_eigs):
         """
@@ -557,12 +557,12 @@ class Projector(nn.Module):
         assert J.dim() == 3, "Weight Jacobian of NN must be batched"
         basis = self.basis[:,-n_eigs:]
         eigs = torch.clamp( self.eigs[-n_eigs:], min=0.)
-        scaling = eigs / (eigs + 1./(Meps))[:, None]
+        scaling = (eigs / (eigs + 1./(Meps)))[:, None]
         # Compute variance      
         JT = J.transpose(2, 1)
         JT_UT = JT @ basis
-        var = JT @ J - JT_UT @ (scaling * JT_UT.transpose(2, 1))
-        return var
+        post_var = (JT @ J - JT_UT @ (scaling * JT_UT.transpose(2, 1))).squeeze()
+        return post_var
     
     def ortho_2norm(self, L, n_eigs):
         """
@@ -612,7 +612,6 @@ class Projector(nn.Module):
         
         return trAB/torch.sqrt(normB)
     
-    @torch.no_grad()
     def compute_distance(self, L, proj_type, n_eigs=None, Meps=5000.):
         if n_eigs is None:
             n_eigs = self.r
