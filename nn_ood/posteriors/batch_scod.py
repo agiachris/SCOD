@@ -21,7 +21,6 @@ class BatchSCOD(SCOD):
         args: configuration variables - defaults are in base_config
         """
         super().__init__(model, dist_fam, args=kwargs)
-        autograd_hacks.add_hooks(self.model)
         proj_types = ["batch_posterior_pred"]
         sketch_types = ["batch_random", "batch_srft"]
         assert self.config["proj_type"] in proj_types, "Only parallelized for batch_posterior_pred projection"
