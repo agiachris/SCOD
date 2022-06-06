@@ -1,4 +1,3 @@
-from enum import auto
 import torch
 
 from autograd_hacks import autograd_hacks
@@ -37,9 +36,13 @@ class BatchSCOD(SCOD):
         batch_size - PyTorch DataLoader batch size for accelerating dataset Fisher computation
         """
         # loop through data in batches
+        shuffle = True
+        if isinstance(dataset, torch.utils.data.IterableDataset):
+            assert batch_size is None
+            shuffle = False
         dataloader = torch.utils.data.DataLoader(dataset,
                                                  batch_size=batch_size,
-                                                 shuffle=True)
+                                                 shuffle=shuffle)
 
         sketch = self.sketch_class(N=self.n_params,
                                    M=len(dataset),

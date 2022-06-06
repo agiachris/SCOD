@@ -268,7 +268,7 @@ class RandomSymSketch(LinearSketch):
         self.T = T
         if T is None: #or T < 6*r + 4:
             self.T = 6*r + 4
-        print("using T =", self.T)
+        # print("using T =", self.T)
         
         self.device = torch.device('cpu')
         if gpu:
