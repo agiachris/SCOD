@@ -5,8 +5,6 @@ from autograd_hacks import autograd_hacks
 from ..distributions import GaussianFixedDiagVar
 from .scod import SCOD
 
-from tqdm import tqdm
-
 
 class BatchSCOD(SCOD):
     """
@@ -50,7 +48,7 @@ class BatchSCOD(SCOD):
                                    gpu=self.gpu)
 
         autograd_hacks.disable_computation_graph()
-        for i, sample in tqdm(enumerate(dataloader), total=len(dataloader)):
+        for i, sample in enumerate(dataloader):
 
             if isinstance(sample, dict):
                 assert input_keys is not None, "Require keys to extract inputs"
