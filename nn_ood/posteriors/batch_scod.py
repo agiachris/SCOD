@@ -56,12 +56,12 @@ class BatchSCOD(SCOD):
             if isinstance(sample, dict):
                 assert input_keys is not None, "Require keys to extract inputs"
                 assert not self.weighted, "Dataset does not provide labels"
-                inputs = [self._prep_vec(sample[k]) for k in input_keys]
+                inputs = [sample[k].to(self.device) for k in input_keys]
                 labels = None
             elif isinstance(sample, tuple):
                 assert input_keys is None, "Keys cannot be used to extract inputs from a tuple"
-                inputs = self._prep_vec(sample[0])
-                labels = self._prep_vec(sample[1])
+                inputs = sample[0].to(self.device)
+                labels = sample[1].to(self.device)
 
             # get params of output dist
             if isinstance(inputs, list): thetas = self.model(*inputs)
@@ -171,10 +171,6 @@ class BatchSCOD(SCOD):
         """
         grads = [p.grad1.contiguous().view(batch_size, -1) for p in self.trainable_params]
         return torch.cat(grads, dim=1)
-
-    def _prep_vec(self, x):
-        if self.gpu: x.cuda()
-        return x
 
     @staticmethod
     def _format_output(x, batch_size=None):

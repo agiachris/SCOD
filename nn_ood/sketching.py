@@ -271,8 +271,7 @@ class RandomSymSketch(LinearSketch):
         # print("using T =", self.T)
         
         self.device = torch.device('cpu')
-        if gpu:
-            self.device = torch.cuda.current_device()
+        if gpu: self.device = torch.cuda.current_device()
             
         self.k = max(self.r + 2, (self.T-1)//3)
         self.l = self.T - self.k
@@ -485,14 +484,14 @@ sketch_args = {
 
 
 class Projector(nn.Module):
-    def __init__(self, N, r, T, gpu=False):
+    def __init__(self, N, r, T, device='cpu'):
         super().__init__()
         self.N = N
         self.r = r
         
-        self.device = torch.device('cpu')
-        if gpu:
-            self.device = torch.cuda.current_device()
+        if isinstance(device, torch.device): self.device = device
+        elif device == "gpu": self.device = self.device = torch.cuda.current_device()
+        else: self.device = torch.device("cpu")
         
         self.eigs = nn.Parameter(torch.zeros(self.r, device=self.device), requires_grad=False)
         self.basis = nn.Parameter(torch.zeros(self.N, self.r, device=self.device), requires_grad=False)

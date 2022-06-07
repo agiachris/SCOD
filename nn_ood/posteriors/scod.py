@@ -36,6 +36,8 @@ class SCOD(nn.Module):
         self.dist_fam = dist_fam
         
         self.gpu = self.config["device"] != "cpu"
+        if self.gpu: self.device = torch.cuda.current_device()
+        else: self.device = torch.device('cpu')
 
         # extract parameters to consider in sketch - keep all that yield valid gradients
         self.trainable_params = list(filter(lambda x: x.requires_grad, self.model.parameters()))
@@ -58,8 +60,8 @@ class SCOD(nn.Module):
             N=self.n_params,
             r=2*max(self.num_eigs + 2, (self.num_samples-1)//3),
             T=self.n_params,
-            gpu=self.gpu
-        )
+            device=self.device
+        ).to(self.device)
         
     def process_dataset(self, dataset):
         """
